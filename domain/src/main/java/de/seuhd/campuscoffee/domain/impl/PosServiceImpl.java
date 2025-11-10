@@ -71,8 +71,7 @@ public class PosServiceImpl implements PosService {
         // Fetch the OSM node data using the port
         OsmNode osmNode = osmDataService.fetchNode(nodeId);
 
-        // Convert OSM node to POS domain object and upsert it
-        // TODO: Implement the actual conversion (the response is currently hard-coded).
+    // Convert OSM node to POS domain object and upsert it
         Pos savedPos = upsert(convertOsmNodeToPos(osmNode));
         log.info("Successfully imported POS '{}' from OSM node {}", savedPos.name(), nodeId);
 
@@ -81,23 +80,94 @@ public class PosServiceImpl implements PosService {
 
     /**
      * Converts an OSM node to a POS domain object.
-     * Note: This is a stub implementation and should be replaced with real mapping logic.
      */
     private @NonNull Pos convertOsmNodeToPos(@NonNull OsmNode osmNode) {
-        if (osmNode.nodeId().equals(5589879349L)) {
-            return Pos.builder()
-                    .name("Rada Coffee & Rösterei")
-                    .description("Caffé und Rösterei")
-                    .type(PosType.CAFE)
-                    .campus(CampusType.ALTSTADT)
-                    .street("Untere Straße")
-                    .houseNumber("21")
-                    .postalCode(69117)
-                    .city("Heidelberg")
-                    .build();
-        } else {
-            throw new OsmNodeMissingFieldsException(osmNode.nodeId());
+    String amenity = osmNode.amenity();
+    String shop = osmNode.shop();
+
+        String name = required(osmNode.name(), "name", osmNode.nodeId());
+        String street = required(osmNode.street(), "addr:street", osmNode.nodeId());
+        String houseNumber = required(osmNode.houseNumber(), "addr:housenumber", osmNode.nodeId());
+        String city = required(osmNode.city(), "addr:city", osmNode.nodeId());
+        String postalCodeRaw = required(osmNode.postalCode(), "addr:postcode", osmNode.nodeId());
+
+        Integer postalCode;
+        try {
+            postalCode = Integer.valueOf(postalCodeRaw);
+        } catch (NumberFormatException e) {
+            throw new OsmNodeMissingFieldsException(osmNode.nodeId(), "postal code must be numeric");
         }
+
+        String description = normalize(osmNode.description());
+        if (description == null) {
+            description = "Imported from OSM node " + osmNode.nodeId();
+            if (osmNode.latitude() != null && osmNode.longitude() != null) {
+                description += String.format(" (lat=%s, lon=%s)", osmNode.latitude(), osmNode.longitude());
+            }
+        }
+
+    PosType posType = resolvePosType(amenity, shop);
+        CampusType campus = resolveCampus(postalCode);
+
+        return Pos.builder()
+                .name(name)
+                .description(description)
+                .type(posType)
+                .campus(campus)
+                .street(street)
+                .houseNumber(houseNumber)
+                .postalCode(postalCode)
+                .city(city)
+                .build();
+    }
+
+    private static PosType resolvePosType(String amenity, String shop) {
+        String normalizedAmenity = normalize(amenity);
+        if (normalizedAmenity != null) {
+            if ("canteen".equalsIgnoreCase(normalizedAmenity)) {
+                return PosType.CAFETERIA;
+            }
+            if ("vending_machine".equalsIgnoreCase(normalizedAmenity)) {
+                return PosType.VENDING_MACHINE;
+            }
+            if ("cafe".equalsIgnoreCase(normalizedAmenity)) {
+                return PosType.CAFE;
+            }
+        }
+
+        String normalizedShop = normalize(shop);
+        if (normalizedShop != null && "bakery".equalsIgnoreCase(normalizedShop)) {
+            return PosType.BAKERY;
+        }
+        return PosType.CAFE;
+    }
+
+    private static CampusType resolveCampus(Integer postalCode) {
+        if (postalCode == null) {
+            return CampusType.ALTSTADT;
+        }
+        return switch (postalCode) {
+            case 69117 -> CampusType.ALTSTADT;
+            case 69115 -> CampusType.BERGHEIM;
+            case 69120 -> CampusType.INF;
+            default -> CampusType.ALTSTADT;
+        };
+    }
+
+    private static String normalize(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static String required(String value, String fieldName, Long nodeId) {
+        String normalized = normalize(value);
+        if (normalized == null) {
+            throw new OsmNodeMissingFieldsException(nodeId, "missing " + fieldName);
+        }
+        return normalized;
     }
 
     /**

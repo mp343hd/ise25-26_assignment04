@@ -7,4 +7,8 @@ public class OsmNodeMissingFieldsException extends RuntimeException {
     public OsmNodeMissingFieldsException(Long posId) {
         super("The OpenStreetMap node with ID " + posId + " does not have the required fields.");
     }
+
+    public OsmNodeMissingFieldsException(Long posId, String details) {
+        super("The OpenStreetMap node with ID " + posId + " does not have the required fields: " + details);
+    }
 }
